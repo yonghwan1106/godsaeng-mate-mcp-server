@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>갓생 메이트 | God-saeng Mate MCP Server</title>
+  <meta name="description" content="자기 계발과 생산적인 하루를 지원하는 AI 라이프스타일 매니지먼트 에이전트">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Outfit:wght@400;600;700;800;900&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-primary: #070709;
+      --bg-secondary: #0d0d12;
+      --bg-card: #13131a;
+      --accent-coral: #ff6b6b;
+      --accent-yellow: #ffe66d;
+      --accent-mint: #4ecdc4;
+      --accent-purple: #a78bfa;
+      --text-primary: #ffffff;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      --gradient-coral: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);
+      --gradient-mint: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+      --gradient-yellow: linear-gradient(135deg, #ffe66d 0%, #f7b733 100%);
+      --gradient-purple: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
+      --glow-coral: 0 0 60px rgba(255, 107, 107, 0.3);
+      --glow-mint: 0 0 60px rgba(78, 205, 196, 0.3);
+      --font-display: 'Black Han Sans', sans-serif;
+      --font-heading: 'Outfit', sans-serif;
+      --font-body: 'Noto Sans KR', sans-serif;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Noise texture overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    /* Animated gradient background */
+    .bg-gradient {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      overflow: hidden;
+    }
+
+    .bg-gradient::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background:
+        radial-gradient(ellipse at 20% 20%, rgba(255, 107, 107, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(78, 205, 196, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(167, 139, 250, 0.08) 0%, transparent 60%);
+      animation: bgMove 20s ease-in-out infinite;
+    }
+
+    @keyframes bgMove {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      33% { transform: translate(2%, 2%) rotate(1deg); }
+      66% { transform: translate(-1%, 1%) rotate(-1deg); }
+    }
+
+    /* Navigation */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 1.5rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(to bottom, var(--bg-primary) 0%, transparent 100%);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: var(--gradient-coral);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.3s ease;
+    }
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 50px;
+      font-family: var(--font-heading);
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--gradient-coral);
+      color: white;
+      box-shadow: var(--glow-coral);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 80px rgba(255, 107, 107, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Hero Section */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 8rem 2rem 4rem;
+      position: relative;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(255, 107, 107, 0.1);
+      border: 1px solid rgba(255, 107, 107, 0.3);
+      border-radius: 50px;
+      font-size: 0.85rem;
+      color: var(--accent-coral);
+      margin-bottom: 2rem;
+      animation: fadeInUp 0.8s ease-out;
+    }
+
+    .hero-badge::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: var(--accent-coral);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(3.5rem, 12vw, 9rem);
+      line-height: 1;
+      margin-bottom: 1rem;
+      animation: fadeInUp 0.8s ease-out 0.1s both;
+    }
+
+    .hero-title .gradient-text {
+      background: var(--gradient-coral);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-subtitle {
+      font-family: var(--font-heading);
+      font-size: clamp(1rem, 3vw, 1.5rem);
+      font-weight: 400;
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      animation: fadeInUp 0.8s ease-out 0.2s both;
+    }
+
+    .hero-description {
+      max-width: 600px;
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      margin-bottom: 3rem;
+      animation: fadeInUp 0.8s ease-out 0.3s both;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      animation: fadeInUp 0.8s ease-out 0.4s both;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Floating elements */
+    .floating-elements {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .float-icon {
+      position: absolute;
+      font-size: 2rem;
+      opacity: 0.6;
+      animation: float 6s ease-in-out infinite;
+    }
+
+    .float-icon:nth-child(1) { top: 20%; left: 10%; animation-delay: 0s; }
+    .float-icon:nth-child(2) { top: 30%; right: 15%; animation-delay: 1s; }
+    .float-icon:nth-child(3) { bottom: 30%; left: 8%; animation-delay: 2s; }
+    .float-icon:nth-child(4) { bottom: 25%; right: 10%; animation-delay: 3s; }
+    .float-icon:nth-child(5) { top: 50%; left: 5%; animation-delay: 1.5s; }
+    .float-icon:nth-child(6) { top: 15%; right: 8%; animation-delay: 2.5s; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-20px) rotate(5deg); }
+    }
+
+    /* Section styling */
+    section {
+      padding: 6rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-family: var(--font-heading);
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--accent-mint);
+      margin-bottom: 1rem;
+    }
+
+    .section-label::before {
+      content: '';
+      width: 40px;
+      height: 2px;
+      background: var(--accent-mint);
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      margin-bottom: 1rem;
+    }
+
+    .section-description {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin-bottom: 3rem;
+    }
+
+    /* Features Section */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 2rem;
+      margin-top: 3rem;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border-radius: 24px;
+      padding: 2.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.4s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+    }
+
+    .feature-card:nth-child(1)::before { background: var(--gradient-coral); }
+    .feature-card:nth-child(2)::before { background: var(--gradient-mint); }
+    .feature-card:nth-child(3)::before { background: var(--gradient-yellow); }
+
+    .feature-card:hover {
+      transform: translateY(-8px);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .feature-card:hover::before {
+      opacity: 1;
+    }
+
+    .feature-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .feature-card:nth-child(1) .feature-icon {
+      background: rgba(255, 107, 107, 0.15);
+      box-shadow: 0 0 30px rgba(255, 107, 107, 0.2);
+    }
+
+    .feature-card:nth-child(2) .feature-icon {
+      background: rgba(78, 205, 196, 0.15);
+      box-shadow: 0 0 30px rgba(78, 205, 196, 0.2);
+    }
+
+    .feature-card:nth-child(3) .feature-icon {
+      background: rgba(255, 230, 109, 0.15);
+      box-shadow: 0 0 30px rgba(255, 230, 109, 0.2);
+    }
+
+    .feature-title {
+      font-family: var(--font-heading);
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature-tool-name {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: var(--accent-purple);
+      background: rgba(167, 139, 250, 0.1);
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      display: inline-block;
+      margin-bottom: 1rem;
+    }
+
+    .feature-description {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.7;
+    }
+
+    .feature-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .feature-tag {
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 20px;
+      color: var(--text-muted);
+    }
+
+    /* How it works */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 2rem;
+      margin-top: 3rem;
+    }
+
+    .step {
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .step-number {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--bg-card);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-heading);
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin: 0 auto 1.5rem;
+      position: relative;
+    }
+
+    .step:nth-child(1) .step-number { color: var(--accent-coral); }
+    .step:nth-child(2) .step-number { color: var(--accent-mint); }
+    .step:nth-child(3) .step-number { color: var(--accent-yellow); }
+    .step:nth-child(4) .step-number { color: var(--accent-purple); }
+
+    .step-title {
+      font-family: var(--font-heading);
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+
+    .step-description {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    /* Tech Stack */
+    .tech-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      margin-top: 2rem;
+    }
+
+    .tech-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      font-size: 0.9rem;
+      transition: all 0.3s ease;
+    }
+
+    .tech-badge:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .tech-badge img {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* CTA Section */
+    .cta {
+      text-align: center;
+      padding: 8rem 2rem;
+      position: relative;
+    }
+
+    .cta::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(255, 107, 107, 0.15) 0%, transparent 70%);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .cta-title {
+      font-family: var(--font-display);
+      font-size: clamp(2.5rem, 6vw, 4rem);
+      margin-bottom: 1rem;
+      position: relative;
+    }
+
+    .cta-description {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      max-width: 500px;
+      margin: 0 auto 2rem;
+      position: relative;
+    }
+
+    /* Footer */
+    footer {
+      padding: 4rem 2rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      text-align: center;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.3s ease;
+    }
+
+    .footer-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .footer-copyright {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .footer-copyright a {
+      color: var(--accent-coral);
+      text-decoration: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      nav {
+        padding: 1rem;
+      }
+
+      .nav-links {
+        display: none;
+      }
+
+      .hero {
+        padding: 6rem 1.5rem 3rem;
+      }
+
+      .features {
+        grid-template-columns: 1fr;
+      }
+
+      .feature-card {
+        padding: 2rem;
+      }
+
+      section {
+        padding: 4rem 1.5rem;
+      }
+
+      .float-icon {
+        display: none;
+      }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg-primary);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--bg-card);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-gradient"></div>
+
+  <!-- Navigation -->
+  <nav>
+    <a href="#" class="logo">
+      <div class="logo-icon">🔥</div>
+      <span class="logo-text">갓생메이트</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#how-it-works">사용법</a>
+      <a href="https://github.com/yonghwan1106/godsaeng-mate-mcp-server" target="_blank">GitHub</a>
+      <a href="https://playmcp.kakao.com" target="_blank" class="btn btn-primary">PlayMCP에서 사용</a>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="floating-elements">
+      <span class="float-icon">📚</span>
+      <span class="float-icon">💪</span>
+      <span class="float-icon">☕</span>
+      <span class="float-icon">🎯</span>
+      <span class="float-icon">⏰</span>
+      <span class="float-icon">✨</span>
+    </div>
+
+    <div class="hero-badge">
+      <span>카카오 MCP Player 10 공모전 참가작</span>
+    </div>
+
+    <h1 class="hero-title">
+      <span class="gradient-text">갓생</span>메이트
+    </h1>
+
+    <p class="hero-subtitle">God-saeng Mate MCP Server</p>
+
+    <p class="hero-description">
+      자기 계발과 생산적인 하루를 지원하는<br>
+      <strong>AI 라이프스타일 매니지먼트 에이전트</strong>
+    </p>
+
+    <div class="hero-buttons">
+      <a href="https://playmcp.kakao.com" target="_blank" class="btn btn-primary">
+        <span>🚀</span> PlayMCP에서 시작하기
+      </a>
+      <a href="https://github.com/yonghwan1106/godsaeng-mate-mcp-server" target="_blank" class="btn btn-secondary">
+        <span>📦</span> GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features">
+    <span class="section-label">Features</span>
+    <h2 class="section-title">세 가지 핵심 도구</h2>
+    <p class="section-description">
+      카카오 API와 연동하여 장소 검색, 일정 관리, 동기 부여까지 갓생의 모든 것을 지원합니다.
+    </p>
+
+    <div class="features">
+      <div class="feature-card">
+        <div class="feature-icon">📍</div>
+        <span class="feature-tool-name">godsaeng_search_spot</span>
+        <h3 class="feature-title">생산성 장소 검색</h3>
+        <p class="feature-description">
+          공부, 운동, 독서, 업무 목적에 맞는 최적의 장소를 찾아드립니다.
+          스터디카페, 헬스장, 북카페, 코워킹스페이스를 한 번에 검색하세요.
+        </p>
+        <div class="feature-tags">
+          <span class="feature-tag">Kakao Local API</span>
+          <span class="feature-tag">위치 기반 검색</span>
+          <span class="feature-tag">카테고리 필터</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📅</div>
+        <span class="feature-tool-name">godsaeng_block_session</span>
+        <h3 class="feature-title">몰입 시간 등록</h3>
+        <p class="feature-description">
+          톡캘린더에 집중 시간을 블로킹하세요.
+          장소와 알림을 함께 설정하여 계획을 실행으로 옮기는 힘을 키워드립니다.
+        </p>
+        <div class="feature-tags">
+          <span class="feature-tag">Kakao Calendar API</span>
+          <span class="feature-tag">스마트 알림</span>
+          <span class="feature-tag">장소 연동</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">💌</div>
+        <span class="feature-tool-name">godsaeng_send_commitment</span>
+        <h3 class="feature-title">다짐 카드 전송</h3>
+        <p class="feature-description">
+          오늘의 목표를 카카오톡 '나에게 보내기'로 전송하세요.
+          스스로에게 보내는 응원 메시지가 실행력을 높여줍니다.
+        </p>
+        <div class="feature-tags">
+          <span class="feature-tag">Kakao Message API</span>
+          <span class="feature-tag">Feed 템플릿</span>
+          <span class="feature-tag">동기 부여</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how-it-works">
+    <span class="section-label">How it works</span>
+    <h2 class="section-title">어떻게 사용하나요?</h2>
+    <p class="section-description">
+      PlayMCP를 통해 간편하게 갓생 메이트를 사용할 수 있습니다.
+    </p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <h3 class="step-title">PlayMCP 접속</h3>
+        <p class="step-description">
+          playmcp.kakao.com에서<br>
+          카카오 계정으로 로그인합니다
+        </p>
+      </div>
+
+      <div class="step">
+        <div class="step-number">2</div>
+        <h3 class="step-title">갓생메이트 추가</h3>
+        <p class="step-description">
+          MCP 서버 마켓에서<br>
+          갓생메이트를 찾아 추가합니다
+        </p>
+      </div>
+
+      <div class="step">
+        <div class="step-number">3</div>
+        <h3 class="step-title">권한 허용</h3>
+        <p class="step-description">
+          톡캘린더와 메시지 전송<br>
+          권한을 허용합니다
+        </p>
+      </div>
+
+      <div class="step">
+        <div class="step-number">4</div>
+        <h3 class="step-title">갓생 시작!</h3>
+        <p class="step-description">
+          AI에게 오늘의 갓생 계획을<br>
+          말해보세요
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tech Stack -->
+  <section style="text-align: center;">
+    <span class="section-label">Tech Stack</span>
+    <h2 class="section-title">기술 스택</h2>
+
+    <div class="tech-stack">
+      <div class="tech-badge">
+        <span>📘</span> TypeScript
+      </div>
+      <div class="tech-badge">
+        <span>🔌</span> MCP SDK
+      </div>
+      <div class="tech-badge">
+        <span>✅</span> Zod
+      </div>
+      <div class="tech-badge">
+        <span>⚡</span> Express
+      </div>
+      <div class="tech-badge">
+        <span>▲</span> Vercel
+      </div>
+      <div class="tech-badge">
+        <span>💬</span> Kakao API
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="cta">
+    <h2 class="cta-title">오늘부터 갓생 시작! 🔥</h2>
+    <p class="cta-description">
+      AI와 함께 더 생산적이고 계획적인 하루를 만들어보세요.
+    </p>
+    <a href="https://playmcp.kakao.com" target="_blank" class="btn btn-primary" style="font-size: 1.1rem; padding: 1rem 2rem;">
+      <span>🚀</span> PlayMCP에서 시작하기
+    </a>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-links">
+      <a href="https://github.com/yonghwan1106/godsaeng-mate-mcp-server" target="_blank">GitHub</a>
+      <a href="https://playmcp.kakao.com" target="_blank">PlayMCP</a>
+      <a href="https://b.kakao.com/views/PlayMCP/MCP_Player_10" target="_blank">MCP Player 10</a>
+    </div>
+    <p class="footer-copyright">
+      Built with 🔥 for <a href="https://b.kakao.com/views/PlayMCP/MCP_Player_10" target="_blank">카카오 MCP Player 10 공모전</a>
+      <br><br>
+      © 2026 갓생메이트. Generated with Claude Code.
+    </p>
+  </footer>
+
+  <script>
+    // Intersection Observer for animations
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.opacity = '1';
+          entry.target.style.transform = 'translateY(0)';
+        }
+      });
+    }, observerOptions);
+
+    document.querySelectorAll('.feature-card, .step').forEach(el => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(30px)';
+      el.style.transition = 'all 0.6s ease-out';
+      observer.observe(el);
+    });
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+  </script>
+</body>
+</html>
