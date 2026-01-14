@@ -1,331 +1,494 @@
 /**
- * Vercel Serverless Handler for Godsaeng Mate MCP Server
+ * Godsaeng Mate MCP Server - Vercel Serverless Handler
  *
- * Handles MCP requests via stateless JSON-RPC for PlayMCP integration.
- * Uses direct JSON-RPC handling (no transport layer) for Vercel compatibility.
+ * Self-contained MCP handler for PlayMCP integration.
+ * All logic inline to avoid module resolution issues in Vercel.
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { SearchSpotInputSchema, type SearchSpotInput } from "../src/schemas/searchSpot.js";
-import { BlockSessionInputSchema, type BlockSessionInput } from "../src/schemas/blockSession.js";
-import { SendCommitmentInputSchema, type SendCommitmentInput } from "../src/schemas/sendCommitment.js";
-import {
-  searchPlaces,
-  coordinateLookup,
-  formatSearchSpotResult,
-} from "../src/services/kakaoLocalApi.js";
-import {
-  createCalendarEvent,
-  formatDateTime,
-  formatBlockSessionResult,
-} from "../src/services/kakaoCalendarApi.js";
-import {
-  sendCommitmentCard,
-  getRandomEncouragement,
-  formatSendCommitmentResult,
-} from "../src/services/kakaoMessageApi.js";
-import { PURPOSE_CATEGORY_MAP, PURPOSE_KEYWORDS } from "../src/constants.js";
-import type { SearchSpotOutput, BlockSessionOutput, SendCommitmentOutput } from "../src/types.js";
 
-// Server metadata
+// ===== Type Definitions =====
+
+interface KakaoPlace {
+  place_name: string;
+  address_name: string;
+  road_address_name: string;
+  phone: string;
+  category_name: string;
+  distance: string;
+  place_url: string;
+  x: string;
+  y: string;
+}
+
+interface KakaoLocalResponse {
+  documents: KakaoPlace[];
+  meta: { total_count: number };
+}
+
+interface KakaoAddressDocument {
+  x: string;
+  y: string;
+  address_name: string;
+}
+
+interface KakaoAddressResponse {
+  documents: KakaoAddressDocument[];
+}
+
+type Purpose = "study" | "exercise" | "reading" | "work";
+
+// ===== Constants =====
+
 const SERVER_INFO = {
   name: "godsaeng-mate-mcp-server",
   version: "1.0.0",
 };
 
-// Tool definitions for MCP
+const KAKAO_REST_API_KEY = process.env.KAKAO_REST_API_KEY;
+const DEFAULT_TIMEOUT = 10000;
+const CHARACTER_LIMIT = 25000;
+
+const PURPOSE_CONFIG: Record<Purpose, { defaultKeyword: string; categoryCode: string | null }> = {
+  study: { defaultKeyword: "스터디카페", categoryCode: "CE7" },
+  exercise: { defaultKeyword: "헬스장", categoryCode: null },
+  reading: { defaultKeyword: "북카페", categoryCode: "CE7" },
+  work: { defaultKeyword: "코워킹스페이스", categoryCode: null },
+};
+
+const PURPOSE_LABELS: Record<Purpose, string> = {
+  study: "공부",
+  exercise: "운동",
+  reading: "독서",
+  work: "업무",
+};
+
+const ENCOURAGEMENT_MESSAGES = [
+  "오늘 하루도 갓생 달성!",
+  "작은 실천이 큰 변화를 만듭니다",
+  "꾸준함이 실력이 됩니다",
+  "오늘의 노력이 내일의 나를 만듭니다",
+  "할 수 있다! 파이팅!",
+  "시작이 반이다!",
+  "포기하지 않는 당신이 멋집니다",
+];
+
+// ===== Tool Definitions =====
+
 const TOOLS = [
   {
     name: "godsaeng_search_spot",
-    description: `Search for productivity spots (cafes, gyms, co-working spaces) based on purpose.
-
-This tool helps users find the best places for their "God-saeng" activities like studying, exercising, reading, or working.
+    description: `Search for productivity spots based on purpose.
 
 Args:
-  - purpose: "study" | "exercise" | "reading" | "work" - What you want to do
-  - location: string - Location to search near (e.g., "홍대입구역", "강남역")
+  - purpose: "study" | "exercise" | "reading" | "work"
+  - location: string - Location to search near (e.g., "홍대입구역")
   - keyword (optional): Additional search keyword
-  - radius (optional): Search radius in meters (default: 500, max: 20000)
-  - limit (optional): Number of results (default: 5, max: 15)
+  - radius (optional): Search radius in meters (default: 500)
+  - limit (optional): Number of results (default: 5)
 
 Examples:
-  - "홍대 근처 공부할 카페 찾아줘" -> purpose="study", location="홍대입구역"
-  - "강남역 주변 헬스장" -> purpose="exercise", location="강남역"`,
+  - "홍대 근처 공부할 카페" -> purpose="study", location="홍대입구역"`,
     inputSchema: {
       type: "object",
       properties: {
         purpose: {
           type: "string",
           enum: ["study", "exercise", "reading", "work"],
-          description: "Purpose of visit: study (카페/스터디), exercise (헬스장/운동), reading (북카페), work (코워킹스페이스)",
+          description: "Purpose: study, exercise, reading, work",
         },
         location: {
           type: "string",
-          description: "Location to search near (e.g., '홍대입구역', '강남역')",
+          description: "Location to search near",
         },
-        keyword: {
-          type: "string",
-          description: "Additional search keyword (optional)",
-        },
-        radius: {
-          type: "number",
-          description: "Search radius in meters (default: 500, max: 20000)",
-        },
-        limit: {
-          type: "number",
-          description: "Number of results to return (default: 5, max: 15)",
-        },
-        response_format: {
-          type: "string",
-          enum: ["markdown", "json"],
-          description: "Response format (default: markdown)",
-        },
+        keyword: { type: "string", description: "Additional keyword (optional)" },
+        radius: { type: "number", description: "Search radius in meters (default: 500)" },
+        limit: { type: "number", description: "Number of results (default: 5)" },
+        response_format: { type: "string", enum: ["markdown", "json"], description: "Response format" },
       },
       required: ["purpose", "location"],
     },
   },
   {
     name: "godsaeng_block_session",
-    description: `Create a focus session event in Kakao Talk Calendar.
+    description: `Create a focus session in Kakao Talk Calendar.
 
-This tool helps users block dedicated time for their "God-saeng" activities by creating calendar events with reminders.
-
-**IMPORTANT**: This tool requires OAuth authentication. The access token must be provided via the request context.
+**Requires OAuth authentication**
 
 Args:
-  - title: string - Event title (e.g., "자격증 공부", "헬스장 운동")
-  - start_time: string - Start time in ISO 8601 format (e.g., "2026-01-15T19:00:00")
-  - duration_minutes: number - Duration in minutes (15-480)
-  - location_name (optional): Name of the location
-  - location_address (optional): Address of the location
-  - reminder_minutes (optional): Reminder before event (default: 15)
-  - color (optional): Calendar color - BLUE, RED, YELLOW, GREEN, PINK, ORANGE, PURPLE, GRAY
+  - title: string - Event title
+  - start_time: string - ISO 8601 format
+  - duration_minutes: number - Duration (15-480)
+  - location_name, reminder_minutes, color (optional)
 
-Examples:
-  - "오늘 저녁 7시부터 2시간 공부 일정" -> title="공부", start_time="2026-01-15T19:00:00", duration_minutes=120`,
+Example: "저녁 7시 2시간 공부" -> title="공부", start_time="...", duration_minutes=120`,
     inputSchema: {
       type: "object",
       properties: {
-        title: {
-          type: "string",
-          description: "Event title",
-        },
-        start_time: {
-          type: "string",
-          description: "Start time in ISO 8601 format",
-        },
-        duration_minutes: {
-          type: "number",
-          description: "Duration in minutes (15-480)",
-        },
-        location_name: {
-          type: "string",
-          description: "Name of the location (optional)",
-        },
-        location_address: {
-          type: "string",
-          description: "Address of the location (optional)",
-        },
-        reminder_minutes: {
-          type: "number",
-          description: "Reminder before event in minutes (default: 15)",
-        },
-        color: {
-          type: "string",
-          enum: ["BLUE", "RED", "YELLOW", "GREEN", "PINK", "ORANGE", "PURPLE", "GRAY"],
-          description: "Calendar event color (default: BLUE)",
-        },
+        title: { type: "string", description: "Event title" },
+        start_time: { type: "string", description: "Start time (ISO 8601)" },
+        duration_minutes: { type: "number", description: "Duration in minutes" },
+        location_name: { type: "string", description: "Location name (optional)" },
+        location_address: { type: "string", description: "Location address (optional)" },
+        reminder_minutes: { type: "number", description: "Reminder (default: 15)" },
+        color: { type: "string", enum: ["BLUE", "RED", "YELLOW", "GREEN", "PINK", "ORANGE", "PURPLE", "GRAY"] },
       },
       required: ["title", "start_time", "duration_minutes"],
     },
   },
   {
     name: "godsaeng_send_commitment",
-    description: `Send a commitment card to Kakao Talk "나에게 보내기" (Send to Me).
+    description: `Send a commitment card to Kakao Talk "나에게 보내기".
 
-This tool helps users make a commitment by sending a motivational card to their own Kakao Talk chat.
-
-**IMPORTANT**: This tool requires OAuth authentication. The access token must be provided via the request context.
+**Requires OAuth authentication**
 
 Args:
-  - goal: string - Today's goal (e.g., "자격증 공부 2시간", "헬스장에서 운동 1시간")
-  - location_name (optional): Name of the location
-  - location_url (optional): Kakao Map URL for the location
-  - encouragement (optional): Custom encouragement message
-  - template_type (optional): "feed" | "text" (default: "feed")
+  - goal: string - Today's goal
+  - location_name, location_url, encouragement (optional)
 
-Examples:
-  - "오늘 자격증 공부 2시간 하겠다고 다짐 카드 보내줘" -> goal="자격증 공부 2시간"`,
+Example: "자격증 공부 2시간" -> goal="자격증 공부 2시간"`,
     inputSchema: {
       type: "object",
       properties: {
-        goal: {
-          type: "string",
-          description: "Today's goal",
-        },
-        location_name: {
-          type: "string",
-          description: "Name of the location (optional)",
-        },
-        location_url: {
-          type: "string",
-          description: "Kakao Map URL for the location (optional)",
-        },
-        encouragement: {
-          type: "string",
-          description: "Custom encouragement message (optional)",
-        },
-        template_type: {
-          type: "string",
-          enum: ["feed", "text"],
-          description: "Message template type (default: feed)",
-        },
+        goal: { type: "string", description: "Today's goal" },
+        location_name: { type: "string", description: "Location name (optional)" },
+        location_url: { type: "string", description: "Kakao Map URL (optional)" },
+        encouragement: { type: "string", description: "Custom encouragement (optional)" },
+        template_type: { type: "string", enum: ["feed", "text"], description: "Template type (default: feed)" },
       },
       required: ["goal"],
     },
   },
 ];
 
-// ===== Tool Execution Functions =====
+// ===== Utility Functions =====
 
-async function executeSearchSpot(args: SearchSpotInput): Promise<string> {
-  const format = args.response_format || "markdown";
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function truncateResponse(content: string): string {
+  if (content.length <= CHARACTER_LIMIT) return content;
+  return `${content.slice(0, CHARACTER_LIMIT - 100)}\n\n... (응답이 잘렸습니다)`;
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = DEFAULT_TIMEOUT): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    // Get coordinates for the location
-    const coords = await coordinateLookup(args.location);
-
-    // Build search query based on purpose
-    const purposeKeyword = PURPOSE_KEYWORDS[args.purpose] || "";
-    const searchQuery = args.keyword
-      ? `${args.keyword} ${purposeKeyword}`.trim()
-      : purposeKeyword;
-
-    // Search for places
-    const places = await searchPlaces(
-      searchQuery,
-      coords.longitude,
-      coords.latitude,
-      {
-        radius: args.radius || 500,
-        size: args.limit || 5,
-        categoryGroupCode: PURPOSE_CATEGORY_MAP[args.purpose],
-      }
-    );
-
-    const result: SearchSpotOutput = {
-      purpose: args.purpose,
-      location: args.location,
-      count: places.length,
-      places: places.map((place) => ({
-        name: place.place_name,
-        address: place.road_address_name || place.address_name,
-        distance: place.distance,
-        phone: place.phone || undefined,
-        url: place.place_url,
-        category: place.category_name,
-      })),
-    };
-
-    return formatSearchSpotResult(result, format);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류";
-    return `❌ 장소 검색 실패: ${errorMessage}`;
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-async function executeBlockSession(args: BlockSessionInput): Promise<string> {
+// ===== Kakao API Functions =====
+
+async function getCoordinates(location: string): Promise<{ x: string; y: string } | null> {
+  if (!KAKAO_REST_API_KEY) return null;
+
+  try {
+    // Try address search first
+    const addressUrl = `https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(location)}`;
+    const addressRes = await fetchWithTimeout(addressUrl, {
+      headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
+    });
+    const addressData = (await addressRes.json()) as KakaoAddressResponse;
+
+    if (addressData.documents.length > 0) {
+      return { x: addressData.documents[0].x, y: addressData.documents[0].y };
+    }
+
+    // Fallback to keyword search
+    const keywordUrl = `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(location)}&size=1`;
+    const keywordRes = await fetchWithTimeout(keywordUrl, {
+      headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
+    });
+    const keywordData = (await keywordRes.json()) as KakaoLocalResponse;
+
+    if (keywordData.documents.length > 0) {
+      return { x: keywordData.documents[0].x, y: keywordData.documents[0].y };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function searchPlaces(
+  purpose: Purpose,
+  location: string,
+  keyword?: string,
+  radius = 500,
+  limit = 5
+): Promise<KakaoPlace[]> {
+  if (!KAKAO_REST_API_KEY) {
+    throw new Error("KAKAO_REST_API_KEY가 설정되지 않았습니다.");
+  }
+
+  const coords = await getCoordinates(location);
+  if (!coords) {
+    throw new Error(`위치를 찾을 수 없습니다: ${location}`);
+  }
+
+  const config = PURPOSE_CONFIG[purpose];
+  const searchKeyword = keyword || config.defaultKeyword;
+  const fullQuery = `${location} ${searchKeyword}`;
+
+  let url = `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(fullQuery)}&x=${coords.x}&y=${coords.y}&radius=${radius}&size=${limit}&sort=distance`;
+
+  if (config.categoryCode) {
+    url += `&category_group_code=${config.categoryCode}`;
+  }
+
+  const response = await fetchWithTimeout(url, {
+    headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error("Kakao API 인증 실패");
+    throw new Error(`장소 검색 실패: ${response.status}`);
+  }
+
+  const data = (await response.json()) as KakaoLocalResponse;
+  return data.documents;
+}
+
+// ===== Tool Execution Functions =====
+
+async function executeSearchSpot(args: {
+  purpose: Purpose;
+  location: string;
+  keyword?: string;
+  radius?: number;
+  limit?: number;
+  response_format?: string;
+}): Promise<string> {
+  const format = args.response_format || "markdown";
+
+  try {
+    const places = await searchPlaces(
+      args.purpose,
+      args.location,
+      args.keyword,
+      args.radius || 500,
+      args.limit || 5
+    );
+
+    if (format === "json") {
+      return JSON.stringify({
+        purpose: args.purpose,
+        location: args.location,
+        count: places.length,
+        places: places.map((p) => ({
+          name: p.place_name,
+          address: p.road_address_name || p.address_name,
+          distance: p.distance,
+          phone: p.phone,
+          url: p.place_url,
+          category: p.category_name,
+        })),
+      }, null, 2);
+    }
+
+    // Markdown format
+    const purposeLabel = PURPOSE_LABELS[args.purpose];
+    let md = `# ${purposeLabel} 장소 검색 결과\n\n`;
+    md += `**위치**: ${args.location}\n`;
+    md += `**검색 결과**: ${places.length}개\n\n`;
+
+    if (places.length === 0) {
+      md += "검색 결과가 없습니다. 다른 키워드나 위치로 다시 검색해보세요.\n";
+      return md;
+    }
+
+    places.forEach((place, idx) => {
+      md += `## ${idx + 1}. ${place.place_name}\n\n`;
+      md += `- **카테고리**: ${place.category_name}\n`;
+      md += `- **주소**: ${place.road_address_name || place.address_name}\n`;
+      md += `- **거리**: ${place.distance}m\n`;
+      if (place.phone) md += `- **전화**: ${place.phone}\n`;
+      md += `- **지도**: [카카오맵에서 보기](${place.place_url})\n\n`;
+    });
+
+    return truncateResponse(md);
+  } catch (error) {
+    return `❌ 장소 검색 실패: ${getErrorMessage(error)}`;
+  }
+}
+
+async function executeBlockSession(args: {
+  title: string;
+  start_time: string;
+  duration_minutes: number;
+  location_name?: string;
+  location_address?: string;
+  reminder_minutes?: number;
+  color?: string;
+}): Promise<string> {
   const accessToken = process.env.KAKAO_ACCESS_TOKEN;
 
   if (!accessToken) {
-    return "❌ 오류: 카카오 로그인이 필요합니다. PlayMCP에서 카카오 계정으로 로그인해주세요.";
+    return "❌ 카카오 로그인이 필요합니다. PlayMCP에서 카카오 계정으로 로그인해주세요.";
   }
 
   try {
     const startDate = new Date(args.start_time);
     const endDate = new Date(startDate.getTime() + args.duration_minutes * 60 * 1000);
+    const reminderMinutes = Math.round((args.reminder_minutes || 15) / 5) * 5;
 
-    const result = await createCalendarEvent(accessToken, args.title, args.start_time, args.duration_minutes, {
-      locationName: args.location_name,
-      locationAddress: args.location_address,
-      reminderMinutes: args.reminder_minutes,
-      color: args.color,
-      description: `갓생 메이트로 등록한 일정입니다.\n\n목표: ${args.title}`,
-    });
-
-    const output: BlockSessionOutput = {
-      success: true,
-      eventId: result.event_id,
+    const event = {
       title: args.title,
-      startTime: formatDateTime(args.start_time),
-      endTime: formatDateTime(endDate.toISOString()),
-      location: args.location_name,
-      reminder: args.reminder_minutes,
-      message: "톡캘린더에 일정이 등록되었습니다!",
+      time: {
+        start_at: startDate.toISOString().replace(/\.\d{3}Z$/, "Z"),
+        end_at: endDate.toISOString().replace(/\.\d{3}Z$/, "Z"),
+        time_zone: "Asia/Seoul",
+        all_day: false,
+      },
+      color: args.color || "BLUE",
+      description: `갓생 메이트로 등록한 일정입니다.\n\n목표: ${args.title}`,
+      ...(args.location_name && {
+        location: {
+          name: args.location_name,
+          ...(args.location_address && { address: args.location_address }),
+        },
+      }),
+      ...(reminderMinutes > 0 && { reminders: [reminderMinutes] }),
     };
 
-    return formatBlockSessionResult(output, "markdown");
+    const response = await fetchWithTimeout(
+      "https://kapi.kakao.com/v2/api/calendar/create/event",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+        },
+        body: new URLSearchParams({ event: JSON.stringify(event) }),
+      }
+    );
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error("카카오 인증이 만료되었습니다.");
+      if (response.status === 403) throw new Error("톡캘린더 권한이 필요합니다.");
+      throw new Error(`일정 생성 실패: ${response.status}`);
+    }
+
+    const formatTime = (d: Date) => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+
+    let md = "# 일정 등록 완료\n\n";
+    md += `**제목**: ${args.title}\n`;
+    md += `**시작**: ${formatTime(startDate)}\n`;
+    md += `**종료**: ${formatTime(endDate)}\n`;
+    if (args.location_name) md += `**장소**: ${args.location_name}\n`;
+    md += `**알림**: ${reminderMinutes}분 전\n\n`;
+    md += "톡캘린더에 일정이 등록되었습니다!\n";
+
+    return md;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류";
-    return `❌ 일정 등록 실패: ${errorMessage}`;
+    return `❌ 일정 등록 실패: ${getErrorMessage(error)}`;
   }
 }
 
-async function executeSendCommitment(args: SendCommitmentInput): Promise<string> {
+async function executeSendCommitment(args: {
+  goal: string;
+  location_name?: string;
+  location_url?: string;
+  encouragement?: string;
+  template_type?: string;
+}): Promise<string> {
   const accessToken = process.env.KAKAO_ACCESS_TOKEN;
 
   if (!accessToken) {
-    return "❌ 오류: 카카오 로그인이 필요합니다. PlayMCP에서 카카오 계정으로 로그인해주세요.";
+    return "❌ 카카오 로그인이 필요합니다. PlayMCP에서 카카오 계정으로 로그인해주세요.";
   }
 
   try {
-    const encouragement = args.encouragement || getRandomEncouragement();
+    const encouragement = args.encouragement || ENCOURAGEMENT_MESSAGES[Math.floor(Math.random() * ENCOURAGEMENT_MESSAGES.length)];
+    const templateType = args.template_type || "feed";
 
-    const result = await sendCommitmentCard(accessToken, args.goal, {
-      locationName: args.location_name,
-      locationUrl: args.location_url,
-      encouragement: encouragement,
-      templateType: args.template_type,
-    });
+    let template: Record<string, unknown>;
 
-    const output: SendCommitmentOutput = {
-      success: result.success,
-      goal: args.goal,
-      location: args.location_name,
-      encouragement: encouragement,
-      message: result.message,
-    };
+    if (templateType === "feed") {
+      const description = args.location_name
+        ? `${args.goal}\n\n장소: ${args.location_name}\n\n${encouragement}`
+        : `${args.goal}\n\n${encouragement}`;
 
-    return formatSendCommitmentResult(output, "markdown");
+      template = {
+        object_type: "feed",
+        content: {
+          title: "오늘의 갓생 목표",
+          description,
+          link: {
+            web_url: args.location_url || "https://playmcp.kakao.com",
+            mobile_web_url: args.location_url || "https://playmcp.kakao.com",
+          },
+        },
+        ...(args.location_url && {
+          buttons: [{
+            title: "지도 보기",
+            link: { web_url: args.location_url, mobile_web_url: args.location_url },
+          }],
+        }),
+      };
+    } else {
+      template = {
+        object_type: "text",
+        text: `[오늘의 갓생 목표]\n\n${args.goal}\n\n${encouragement}`.substring(0, 200),
+        link: {
+          web_url: args.location_url || "https://playmcp.kakao.com",
+          mobile_web_url: args.location_url || "https://playmcp.kakao.com",
+        },
+      };
+    }
+
+    const response = await fetchWithTimeout(
+      "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+        },
+        body: new URLSearchParams({ template_object: JSON.stringify(template) }),
+      }
+    );
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error("카카오 인증이 만료되었습니다.");
+      if (response.status === 403) throw new Error("메시지 전송 권한이 필요합니다.");
+      throw new Error(`메시지 전송 실패: ${response.status}`);
+    }
+
+    let md = "# 다짐 카드 전송 완료\n\n";
+    md += `**오늘의 목표**: ${args.goal}\n`;
+    if (args.location_name) md += `**장소**: ${args.location_name}\n`;
+    md += `**응원 메시지**: ${encouragement}\n\n`;
+    md += "*카카오톡 '나와의 채팅'을 확인해보세요!*\n";
+
+    return md;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "알 수 없는 오류";
-    return `❌ 메시지 전송 실패: ${errorMessage}`;
+    return `❌ 메시지 전송 실패: ${getErrorMessage(error)}`;
   }
 }
 
 async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
   switch (name) {
-    case "godsaeng_search_spot": {
-      const parsed = SearchSpotInputSchema.safeParse(args);
-      if (!parsed.success) {
-        return `❌ 입력 오류: ${parsed.error.message}`;
-      }
-      return executeSearchSpot(parsed.data);
-    }
-    case "godsaeng_block_session": {
-      const parsed = BlockSessionInputSchema.safeParse(args);
-      if (!parsed.success) {
-        return `❌ 입력 오류: ${parsed.error.message}`;
-      }
-      return executeBlockSession(parsed.data);
-    }
-    case "godsaeng_send_commitment": {
-      const parsed = SendCommitmentInputSchema.safeParse(args);
-      if (!parsed.success) {
-        return `❌ 입력 오류: ${parsed.error.message}`;
-      }
-      return executeSendCommitment(parsed.data);
-    }
+    case "godsaeng_search_spot":
+      return executeSearchSpot(args as Parameters<typeof executeSearchSpot>[0]);
+    case "godsaeng_block_session":
+      return executeBlockSession(args as Parameters<typeof executeBlockSession>[0]);
+    case "godsaeng_send_commitment":
+      return executeSendCommitment(args as Parameters<typeof executeSendCommitment>[0]);
     default:
       return `❌ 알 수 없는 도구: ${name}`;
   }
@@ -341,13 +504,6 @@ function jsonRpcError(id: string | number | null, code: number, message: string)
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
 // ===== Vercel Handler =====
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -360,18 +516,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  // Path check
   const urlPath = req.url?.split("?")[0] || "/";
 
-  // Landing page (root path) - serve static file
-  if (req.method === "GET" && (urlPath === "/" || urlPath === "")) {
-    // Redirect to static index.html
-    res.setHeader("Location", "/public/index.html");
-    return res.status(302).end();
-  }
-
   // Health check
-  if (req.method === "GET" && urlPath === "/health") {
+  if (req.method === "GET" && (urlPath === "/health" || urlPath === "/api/health")) {
     return res.status(200).json({
       status: "ok",
       server: SERVER_INFO.name,
@@ -382,7 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // MCP JSON-RPC endpoint
-  if (req.method === "POST" && (urlPath === "/mcp" || urlPath === "/api" || urlPath === "/api/")) {
+  if (req.method === "POST") {
     try {
       const body = req.body;
       const { jsonrpc, id, method, params } = body;
@@ -397,9 +545,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         case "initialize":
           result = {
             protocolVersion: params?.protocolVersion || "2024-11-05",
-            capabilities: {
-              tools: { listChanged: false },
-            },
+            capabilities: { tools: { listChanged: false } },
             serverInfo: SERVER_INFO,
           };
           break;
@@ -425,9 +571,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           const toolResult = await executeTool(toolName, toolArgs);
-          result = {
-            content: [{ type: "text", text: toolResult }],
-          };
+          result = { content: [{ type: "text", text: toolResult }] };
           break;
         }
 
