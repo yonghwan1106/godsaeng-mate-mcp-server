@@ -13,10 +13,12 @@
   "routes": [
     {
       "src": "/mcp",
+      "methods": ["POST", "OPTIONS"],
       "dest": "/api/index.ts"
     },
     {
       "src": "/health",
+      "methods": ["GET"],
       "dest": "/api/index.ts"
     },
     {
@@ -26,6 +28,10 @@
     {
       "src": "/",
       "dest": "/public/index.html"
+    },
+    {
+      "src": "/public/(.*)",
+      "dest": "/public/$1"
     }
   ],
   "regions": ["icn1"]
