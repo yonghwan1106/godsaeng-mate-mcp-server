@@ -190,8 +190,10 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout 
 
 // ===== Kakao API Functions =====
 
-async function getCoordinates(location: string): Promise<{ x: string; y: string } | null> {
-  if (!KAKAO_REST_API_KEY) return null;
+async function getCoordinates(location: string): Promise<{ x: string; y: string; error?: string }> {
+  if (!KAKAO_REST_API_KEY) {
+    return { x: "", y: "", error: "KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다." };
+  }
 
   try {
     // Try address search first
@@ -199,6 +201,12 @@ async function getCoordinates(location: string): Promise<{ x: string; y: string 
     const addressRes = await fetchWithTimeout(addressUrl, {
       headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
     });
+
+    if (!addressRes.ok) {
+      const errorText = await addressRes.text();
+      return { x: "", y: "", error: `주소 검색 API 오류 (${addressRes.status}): ${errorText}` };
+    }
+
     const addressData = (await addressRes.json()) as KakaoAddressResponse;
 
     if (addressData.documents.length > 0) {
@@ -210,15 +218,21 @@ async function getCoordinates(location: string): Promise<{ x: string; y: string 
     const keywordRes = await fetchWithTimeout(keywordUrl, {
       headers: { Authorization: `KakaoAK ${KAKAO_REST_API_KEY}` },
     });
+
+    if (!keywordRes.ok) {
+      const errorText = await keywordRes.text();
+      return { x: "", y: "", error: `키워드 검색 API 오류 (${keywordRes.status}): ${errorText}` };
+    }
+
     const keywordData = (await keywordRes.json()) as KakaoLocalResponse;
 
     if (keywordData.documents.length > 0) {
       return { x: keywordData.documents[0].x, y: keywordData.documents[0].y };
     }
 
-    return null;
-  } catch {
-    return null;
+    return { x: "", y: "", error: `'${location}'에 대한 검색 결과가 없습니다.` };
+  } catch (e) {
+    return { x: "", y: "", error: `API 호출 중 예외 발생: ${getErrorMessage(e)}` };
   }
 }
 
@@ -234,7 +248,10 @@ async function searchPlaces(
   }
 
   const coords = await getCoordinates(location);
-  if (!coords) {
+  if (coords.error) {
+    throw new Error(coords.error);
+  }
+  if (!coords.x || !coords.y) {
     throw new Error(`위치를 찾을 수 없습니다: ${location}`);
   }
 
